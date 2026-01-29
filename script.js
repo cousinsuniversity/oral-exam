@@ -1,5 +1,4 @@
 // --- FIREBASE CONFIGURATION ---
-// TODO: Replace with your actual Firebase project config keys
 const firebaseConfig = {
   apiKey: "AIzaSyDkwwG3KRH7WC9vfwtlHtXlgtwoHqHi3AU",
   authDomain: "oral-exam-97cf8.firebaseapp.com",
@@ -11,31 +10,48 @@ const firebaseConfig = {
 };
 
 // --- INITIALIZE FIREBASE (PRIMARY APP) ---
-// This instance manages the current logged-in user (Admin or Student)
 if (!firebase.apps.length) {
     firebase.initializeApp(firebaseConfig);
 }
 const auth = firebase.auth();
 const db = firebase.firestore();
 
-// --- INITIALIZE SECONDARY APP (THE "GHOST" ADMIN APP) ---
-// Used ONLY to create new users without logging out the main Admin.
-let secondaryApp = firebase.initializeApp(firebaseConfig, "SecondaryClient");
-let secondaryAuth = secondaryApp.auth();
+// --- INITIALIZE SECONDARY APP ---
+let secondaryApp = null;
+let secondaryAuth = null;
+
+// Initialize secondary app only when needed
+function initializeSecondaryApp() {
+    if (!secondaryApp) {
+        secondaryApp = firebase.initializeApp(firebaseConfig, "Secondary");
+        secondaryAuth = secondaryApp.auth();
+    }
+    return secondaryAuth;
+}
 
 // --- STATE MANAGEMENT ---
 let currentUser = null;
 
-// Ensure these keys match the HTML select values exactly
+// Updated subjects with 80 points each as requested
 const subjectsByLevel = {
-    'JHS': ['Mathematics', 'Science', 'English', 'Filipino'],
-    'SHS': ['Core Statistics', 'Oral Communication', 'Philosophy', 'Research'],
-    'College': ['Purposive Comm', 'Ethics', 'Major Subject 1', 'Major Subject 2']
+    'JHS': ['Math (algebra, geometry, calculus)', 'Science (biology, chemistry, physics)', 'English/Language (grammar, reading, vocabulary)', 'Logical/Abstract Reasoning', 'General Knowledge', 'Filipino/Social Sciences'],
+    'SHS': ['Math (algebra, geometry, calculus)', 'Science (biology, chemistry, physics)', 'English/Language (grammar, reading, vocabulary)', 'Logical/Abstract Reasoning', 'General Knowledge', 'Filipino/Social Sciences'],
+    'College': ['Math (algebra, geometry, calculus)', 'Science (biology, chemistry, physics)', 'English/Language (grammar, reading, vocabulary)', 'Logical/Abstract Reasoning', 'General Knowledge', 'Filipino/Social Sciences']
 };
+
+// Calculate proficiency rating based on score
+function calculateProficiencyRating(score, maxScore) {
+    const percentage = (score / maxScore) * 100;
+    
+    if (percentage >= 90) return { rating: "1.0", status: "proficient" };
+    if (percentage >= 80) return { rating: "2.0", status: "proficient" };
+    if (percentage >= 75) return { rating: "3.0", status: "proficient" };
+    if (percentage >= 70) return { rating: "4.0", status: "proficient" };
+    return { rating: "0.0", status: "not proficient" };
+}
 
 // --- AUTHENTICATION LOGIC ---
 
-// Handle Login (Main App)
 function handleLogin() {
     const email = document.getElementById('email').value;
     const pass = document.getElementById('password').value;
@@ -48,20 +64,18 @@ function handleLogin() {
     auth.signInWithEmailAndPassword(email, pass)
         .then((userCredential) => {
             console.log("Logged in as:", userCredential.user.email);
-            // UI updates automatically via onAuthStateChanged
         })
         .catch((error) => {
             alertCustom("Login Failed: " + error.message);
         });
 }
 
-// Handle Logout
 document.getElementById('logout-btn').addEventListener('click', () => {
     auth.signOut();
     window.location.reload();
 });
 
-// Main Auth Listener (Controls UI visibility)
+// Main Auth Listener
 auth.onAuthStateChanged(async (user) => {
     if (user) {
         currentUser = user;
@@ -69,7 +83,7 @@ auth.onAuthStateChanged(async (user) => {
         document.getElementById('logout-btn').style.display = 'block';
 
         // Check if Admin
-        if (user.email.endsWith('@admin.edu') || user.email === 'admin@test.com') {
+        if (user.email.endsWith('@admin.edu') || user.email === 'admin@test.com' || user.email.includes('admin')) {
             document.getElementById('admin-dashboard').style.display = 'block';
             loadAdminData();
         } else {
@@ -77,7 +91,6 @@ auth.onAuthStateChanged(async (user) => {
             loadStudentData(user.uid);
         }
     } else {
-        // User is logged out
         document.getElementById('auth-section').style.display = 'flex';
         document.getElementById('student-dashboard').style.display = 'none';
         document.getElementById('admin-dashboard').style.display = 'none';
@@ -99,23 +112,32 @@ async function registerStudent() {
     }
 
     try {
-        // 1. Create user in 'Ghost' Auth
+        // Initialize secondary app
+        const secondaryAuth = initializeSecondaryApp();
+        
+        // Create user in secondary Auth
         const userCredential = await secondaryAuth.createUserWithEmailAndPassword(email, pass);
         const newUid = userCredential.user.uid;
 
-        // 2. Write Profile to Firestore (Using Admin's permission)
-        // We force 'scores' to be an empty object to prevent undefined errors later
+        // Initialize scores object for all subjects
+        const subjects = subjectsByLevel[level];
+        const initialScores = {};
+        subjects.forEach(subject => {
+            initialScores[subject] = 0; // Initialize with 0 instead of empty
+        });
+
+        // Write Profile to Firestore
         await db.collection('users').doc(newUid).set({
             name: name,
             email: email,
             level: level,
             role: 'student',
-            scores: {}, 
+            scores: initialScores, 
             totalScore: 0,
             createdAt: firebase.firestore.FieldValue.serverTimestamp()
         });
 
-        // 3. Sign out ghost session
+        // Sign out ghost session
         await secondaryAuth.signOut();
 
         alertCustom("Success! Student Registered.");
@@ -127,7 +149,7 @@ async function registerStudent() {
         document.getElementById('new-name').value = '';
 
     } catch (error) {
-        console.error(error);
+        console.error("Registration Error:", error);
         alertCustom("Registration Error: " + error.message);
     }
 }
@@ -135,21 +157,29 @@ async function registerStudent() {
 function loadAdminData() {
     const list = document.getElementById('admin-student-list');
     
+    // Initial loading message
+    list.innerHTML = '<tr><td colspan="4">Loading candidates...</td></tr>';
+    
     // Real-time listener
-    db.collection('users').where('role', '==', 'student').onSnapshot((snapshot) => {
+    db.collection('users').where('role', '==', 'student')
+      .orderBy('createdAt', 'desc')
+      .onSnapshot((snapshot) => {
         list.innerHTML = '';
+        
         if (snapshot.empty) {
             list.innerHTML = '<tr><td colspan="4">No candidates registered yet.</td></tr>';
             return;
         }
 
+        let hasData = false;
         snapshot.forEach(doc => {
+            hasData = true;
             const data = doc.data();
             const tr = document.createElement('tr');
             tr.innerHTML = `
-                <td>${data.name}</td>
-                <td>${data.level}</td>
-                <td style="color: var(--bb-gold); font-weight:bold;">${data.totalScore || 0}</td>
+                <td>${data.name || 'N/A'}</td>
+                <td>${data.level || 'Not Set'}</td>
+                <td style="color: var(--bb-gold); font-weight:bold;">${data.totalScore || 0} / ${(subjectsByLevel[data.level] || subjectsByLevel['College']).length * 80}</td>
                 <td>
                     <button class="btn" onclick="openGradingModal('${doc.id}', '${data.level}', '${data.name}')">
                         <i class="fas fa-marker"></i> Grade
@@ -158,30 +188,54 @@ function loadAdminData() {
             `;
             list.appendChild(tr);
         });
+        
+        if (!hasData) {
+            list.innerHTML = '<tr><td colspan="4">No candidates registered yet.</td></tr>';
+        }
     }, (error) => {
         console.error("Error loading admin data:", error);
-        list.innerHTML = '<tr><td colspan="4">Error loading data. Check console.</td></tr>';
+        list.innerHTML = '<tr><td colspan="4">Error loading data. Please refresh.</td></tr>';
     });
 }
 
-// Open Grading Modal
 function openGradingModal(uid, level, name) {
     document.getElementById('grading-uid').value = uid;
     const container = document.getElementById('rubric-container');
-    container.innerHTML = `<h3>Grading for: ${name} (${level})</h3>`;
+    
+    // Clear and set up modal
+    container.innerHTML = `
+        <h3>Evaluate: ${name} (${level})</h3>
+        <p style="color: #888; margin-bottom: 20px;">Score each subject out of 80 points</p>
+    `;
 
-    // Fallback to College if level is somehow mismatched
+    // Get subjects for this level
     const subjects = subjectsByLevel[level] || subjectsByLevel['College'];
     
+    // Load existing scores
     db.collection('users').doc(uid).get().then((doc) => {
-        const currentScores = doc.data().scores || {};
+        const data = doc.data();
+        const currentScores = data.scores || {};
         
-        subjects.forEach(sub => {
-            const val = currentScores[sub] !== undefined ? currentScores[sub] : '';
+        subjects.forEach(subject => {
+            const currentScore = currentScores[subject] !== undefined ? currentScores[subject] : '';
+            const proficiency = calculateProficiencyRating(currentScore || 0, 80);
+            
             container.innerHTML += `
-                <div class="rubric-row">
-                    <label style="flex:1;">${sub}</label>
-                    <input type="number" class="score-input" data-subject="${sub}" value="${val}" max="80" min="0" placeholder="0-80" style="width: 80px;">
+                <div class="rubric-row" style="margin-bottom: 15px; padding: 15px; background: #222;">
+                    <div style="flex: 1;">
+                        <strong>${subject}</strong>
+                        <div style="font-size: 0.9em; color: #aaa; margin-top: 5px;">
+                            Current: ${currentScore || 0}/80 • Rating: ${proficiency.rating}
+                        </div>
+                    </div>
+                    <input type="number" 
+                           class="score-input" 
+                           data-subject="${subject}" 
+                           value="${currentScore}" 
+                           max="80" 
+                           min="0" 
+                           placeholder="0-80" 
+                           style="width: 100px; padding: 8px; background: #111; color: white; border: 1px solid var(--bb-border); border-radius: 4px;">
                 </div>
             `;
         });
@@ -190,7 +244,6 @@ function openGradingModal(uid, level, name) {
     openModal('grade-modal');
 }
 
-// Submit Grades
 async function submitGrades() {
     const uid = document.getElementById('grading-uid').value;
     const inputs = document.querySelectorAll('.score-input');
@@ -203,9 +256,9 @@ async function submitGrades() {
         let val = parseInt(input.value);
         if (isNaN(val)) val = 0;
         
-        if (val > 80) val = 80;
-        if (val < 0) val = 0;
-
+        // Enforce 0-80 range
+        val = Math.max(0, Math.min(80, val));
+        
         scores[sub] = val;
         total += val;
     });
@@ -214,85 +267,87 @@ async function submitGrades() {
         await db.collection('users').doc(uid).update({
             scores: scores,
             totalScore: total,
-            gradedAt: firebase.firestore.FieldValue.serverTimestamp()
+            gradedAt: firebase.firestore.FieldValue.serverTimestamp(),
+            lastGradedBy: currentUser.email
         });
 
         closeModal('grade-modal');
-        alertCustom("Scores Updated Successfully");
+        alertCustom("Evaluation submitted successfully!");
     } catch (e) {
+        console.error("Error saving grades:", e);
         alertCustom("Error saving grades: " + e.message);
     }
 }
 
-// --- STUDENT FUNCTIONS (FIXED) ---
+// --- STUDENT FUNCTIONS ---
 
 function loadStudentData(uid) {
+    const nameElement = document.getElementById('s-name');
+    const levelElement = document.getElementById('s-level');
+    const totalScoreElement = document.getElementById('s-total-score');
+    const maxScoreElement = document.getElementById('s-max-score');
+    const statusElement = document.getElementById('s-status');
+    const badgeElement = document.getElementById('s-proficiency-badge');
+    
+    // Set loading states
+    nameElement.innerText = "Loading...";
+    levelElement.innerText = "Loading...";
+    totalScoreElement.innerText = "0";
+    
     db.collection('users').doc(uid).onSnapshot((doc) => {
         if (doc.exists) {
             const data = doc.data();
             
             // 1. Populate Profile Info
-            document.getElementById('s-name').innerText = data.name || "N/A";
-            document.getElementById('s-level').innerText = data.level || "N/A";
-            document.getElementById('s-total-score').innerText = data.totalScore || 0;
-            document.getElementById('s-status').innerText = "Active";
-
-            // 2. Proficiency Badge Logic
-            // Ensure we have a valid subject list. If data.level doesn't match keys, default to College.
-            const subjects = subjectsByLevel[data.level] || subjectsByLevel['College']; 
+            nameElement.innerText = data.name || "Name Not Set";
+            levelElement.innerText = data.level || "Level Not Set";
+            
+            // Ensure scores object exists
+            const scores = data.scores || {};
+            const level = data.level || 'College';
+            const subjects = subjectsByLevel[level] || subjectsByLevel['College'];
+            
+            // Calculate total score
+            let totalScore = 0;
+            subjects.forEach(subject => {
+                totalScore += parseInt(scores[subject]) || 0;
+            });
+            
+            totalScoreElement.innerText = totalScore;
             const maxScore = subjects.length * 80;
-            const currentTotal = data.totalScore || 0;
+            maxScoreElement.innerText = maxScore;
             
-            document.getElementById('s-max-score').innerText = maxScore;
+            // Set status
+            statusElement.innerText = data.gradedAt ? "Evaluated" : "Pending Evaluation";
             
-            const badge = document.getElementById('s-proficiency-badge');
+            // 2. Proficiency Badge Logic
+            const percentage = (totalScore / maxScore) * 100;
+            const proficiency = calculateProficiencyRating(totalScore, maxScore);
             
-            // Calculate proficiency percentage
-            const percentage = (currentTotal / maxScore) * 100;
-
-            if (percentage >= 75) { 
-                badge.innerText = "PROFICIENT"; 
-                badge.className = "badge badge-expert"; 
-            } else if (currentTotal > 0) { 
-                badge.innerText = "NOT PROFICIENT"; 
-                badge.className = "badge badge-poor"; 
-            } else { 
-                badge.innerText = "PENDING"; 
-                badge.className = "badge"; 
-                badge.style.backgroundColor = "#555";
+            badgeElement.innerText = proficiency.status;
+            if (proficiency.status === "proficient") {
+                badgeElement.className = "badge badge-expert";
+            } else {
+                badgeElement.className = "badge badge-poor";
             }
-
-            // 3. Subject Breakdown (FIXED: Shows only Proficiency Text)
-            const tableHead = document.querySelector('#student-grades-table thead tr');
-            // Update Headers to match request
-            tableHead.innerHTML = `<th>Subject</th><th>Proficiency Rating</th>`;
-
+            
+            // 3. Subject Breakdown
             const tbody = document.getElementById('student-grades-body');
             tbody.innerHTML = '';
             
-            const studentScores = data.scores || {};
-
             subjects.forEach((subject) => {
-                const score = studentScores[subject];
-                let statusText = "WAITING";
-                let statusColor = "#888"; // Grey for waiting
-
-                // Logic: Passing is usually 60/80 (75%)
-                if (score !== undefined && score !== null && score !== "") {
-                    if (score >= 60) {
-                        statusText = "PROFICIENT";
-                        statusColor = "#28a745"; // Green
-                    } else {
-                        statusText = "NOT PROFICIENT";
-                        statusColor = "#dc3545"; // Red
-                    }
-                }
-
+                const score = scores[subject] || 0;
+                const subjectProficiency = calculateProficiencyRating(score, 80);
+                
                 tbody.innerHTML += `
                     <tr>
                         <td>${subject}</td>
-                        <td style="color: ${statusColor}; font-weight: bold;">
-                            ${statusText}
+                        <td>
+                            <div>Score: ${score}/80</div>
+                            <div>Rating: ${subjectProficiency.rating}</div>
+                            <div style="color: ${subjectProficiency.status === 'proficient' ? '#28a745' : '#dc3545'}; font-weight: bold;">
+                                ${subjectProficiency.status}
+                            </div>
                         </td>
                     </tr>
                 `;
@@ -300,14 +355,21 @@ function loadStudentData(uid) {
 
         } else {
             console.log("No student document found!");
-            document.getElementById('s-name').innerText = "Record Not Found";
+            nameElement.innerText = "Record Not Found - Please contact administrator";
+            levelElement.innerText = "N/A";
+            badgeElement.innerText = "ERROR";
+            badgeElement.className = "badge";
+            badgeElement.style.backgroundColor = "#dc3545";
         }
     }, (error) => {
         console.error("Error fetching student data:", error);
+        nameElement.innerText = "Error Loading Data";
+        levelElement.innerText = "Error";
+        alertCustom("Error loading your data. Please try refreshing.");
     });
 }
 
-// --- UI UTILS (MODALS) ---
+// --- UI UTILS ---
 
 function openModal(id) {
     document.getElementById(id).style.display = 'block';
@@ -334,3 +396,20 @@ function alertCustom(msg) {
     `;
     document.body.appendChild(div);
 }
+
+// Close modals when clicking outside
+document.addEventListener('click', function(event) {
+    const modals = document.querySelectorAll('.modal-overlay');
+    modals.forEach(modal => {
+        if (event.target === modal) {
+            modal.style.display = 'none';
+        }
+    });
+});
+
+// Add Enter key support for login
+document.getElementById('password').addEventListener('keypress', function(e) {
+    if (e.key === 'Enter') {
+        handleLogin();
+    }
+});
