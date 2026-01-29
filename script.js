@@ -1,5 +1,5 @@
 // --- FIREBASE CONFIGURATION ---
-// Your specific project keys (Converted for browser usage)
+// TODO: Replace with your actual Firebase project config keys
 const firebaseConfig = {
   apiKey: "AIzaSyDkwwG3KRH7WC9vfwtlHtXlgtwoHqHi3AU",
   authDomain: "oral-exam-97cf8.firebaseapp.com",
@@ -19,12 +19,14 @@ const auth = firebase.auth();
 const db = firebase.firestore();
 
 // --- INITIALIZE SECONDARY APP (THE "GHOST" ADMIN APP) ---
-// This instance is used ONLY to create new users without logging out the main Admin.
+// Used ONLY to create new users without logging out the main Admin.
 let secondaryApp = firebase.initializeApp(firebaseConfig, "SecondaryClient");
 let secondaryAuth = secondaryApp.auth();
 
 // --- STATE MANAGEMENT ---
 let currentUser = null;
+
+// Ensure these keys match the HTML select values exactly
 const subjectsByLevel = {
     'JHS': ['Mathematics', 'Science', 'English', 'Filipino'],
     'SHS': ['Core Statistics', 'Oral Communication', 'Philosophy', 'Research'],
@@ -38,9 +40,15 @@ function handleLogin() {
     const email = document.getElementById('email').value;
     const pass = document.getElementById('password').value;
 
+    if (!email || !pass) {
+        alertCustom("Please enter both email and password.");
+        return;
+    }
+
     auth.signInWithEmailAndPassword(email, pass)
         .then((userCredential) => {
             console.log("Logged in as:", userCredential.user.email);
+            // UI updates automatically via onAuthStateChanged
         })
         .catch((error) => {
             alertCustom("Login Failed: " + error.message);
@@ -61,7 +69,6 @@ auth.onAuthStateChanged(async (user) => {
         document.getElementById('logout-btn').style.display = 'block';
 
         // Check if Admin
-        // IMPORTANT: Ensure your admin email matches one of these
         if (user.email.endsWith('@admin.edu') || user.email === 'admin@test.com') {
             document.getElementById('admin-dashboard').style.display = 'block';
             loadAdminData();
@@ -92,23 +99,23 @@ async function registerStudent() {
     }
 
     try {
-        // --- THE PATCH: USE SECONDARY AUTH ---
-        // Create user on the secondary instance so Main Admin stays logged in
+        // 1. Create user in 'Ghost' Auth
         const userCredential = await secondaryAuth.createUserWithEmailAndPassword(email, pass);
         const newUid = userCredential.user.uid;
 
-        // Write data using the Primary DB (Authenticated as Admin)
+        // 2. Write Profile to Firestore (Using Admin's permission)
+        // We force 'scores' to be an empty object to prevent undefined errors later
         await db.collection('users').doc(newUid).set({
             name: name,
             email: email,
             level: level,
             role: 'student',
-            scores: {},
+            scores: {}, 
             totalScore: 0,
             createdAt: firebase.firestore.FieldValue.serverTimestamp()
         });
 
-        // Sign out the secondary instance immediately
+        // 3. Sign out ghost session
         await secondaryAuth.signOut();
 
         alertCustom("Success! Student Registered.");
@@ -151,6 +158,9 @@ function loadAdminData() {
             `;
             list.appendChild(tr);
         });
+    }, (error) => {
+        console.error("Error loading admin data:", error);
+        list.innerHTML = '<tr><td colspan="4">Error loading data. Check console.</td></tr>';
     });
 }
 
@@ -160,14 +170,14 @@ function openGradingModal(uid, level, name) {
     const container = document.getElementById('rubric-container');
     container.innerHTML = `<h3>Grading for: ${name} (${level})</h3>`;
 
+    // Fallback to College if level is somehow mismatched
     const subjects = subjectsByLevel[level] || subjectsByLevel['College'];
     
-    // Fetch existing scores first to pre-fill inputs
     db.collection('users').doc(uid).get().then((doc) => {
         const currentScores = doc.data().scores || {};
         
         subjects.forEach(sub => {
-            const val = currentScores[sub] || '';
+            const val = currentScores[sub] !== undefined ? currentScores[sub] : '';
             container.innerHTML += `
                 <div class="rubric-row">
                     <label style="flex:1;">${sub}</label>
@@ -193,7 +203,6 @@ async function submitGrades() {
         let val = parseInt(input.value);
         if (isNaN(val)) val = 0;
         
-        // Cap at 80
         if (val > 80) val = 80;
         if (val < 0) val = 0;
 
@@ -215,67 +224,86 @@ async function submitGrades() {
     }
 }
 
-
-// --- STUDENT FUNCTIONS ---
+// --- STUDENT FUNCTIONS (FIXED) ---
 
 function loadStudentData(uid) {
     db.collection('users').doc(uid).onSnapshot((doc) => {
         if (doc.exists) {
             const data = doc.data();
-            document.getElementById('s-name').innerText = data.name;
-            document.getElementById('s-level').innerText = data.level;
-            document.getElementById('s-total-score').innerText = data.totalScore || 0;
             
-            // Proficiency Logic
+            // 1. Populate Profile Info
+            document.getElementById('s-name').innerText = data.name || "N/A";
+            document.getElementById('s-level').innerText = data.level || "N/A";
+            document.getElementById('s-total-score').innerText = data.totalScore || 0;
+            document.getElementById('s-status').innerText = "Active";
+
+            // 2. Proficiency Badge Logic
+            // Ensure we have a valid subject list. If data.level doesn't match keys, default to College.
             const subjects = subjectsByLevel[data.level] || subjectsByLevel['College']; 
             const maxScore = subjects.length * 80;
-            const percentage = ((data.totalScore || 0) / maxScore) * 100;
+            const currentTotal = data.totalScore || 0;
             
             document.getElementById('s-max-score').innerText = maxScore;
             
             const badge = document.getElementById('s-proficiency-badge');
             
-            if (percentage >= 90) { 
-                badge.innerText = "Excellent"; 
+            // Calculate proficiency percentage
+            const percentage = (currentTotal / maxScore) * 100;
+
+            if (percentage >= 75) { 
+                badge.innerText = "PROFICIENT"; 
                 badge.className = "badge badge-expert"; 
-            } else if (percentage >= 75) { 
-                badge.innerText = "Proficient"; 
-                badge.className = "badge badge-avg"; 
-            } else if (percentage > 0) { 
-                badge.innerText = "Needs Improvement"; 
+            } else if (currentTotal > 0) { 
+                badge.innerText = "NOT PROFICIENT"; 
                 badge.className = "badge badge-poor"; 
             } else { 
-                badge.innerText = "Pending"; 
+                badge.innerText = "PENDING"; 
                 badge.className = "badge"; 
                 badge.style.backgroundColor = "#555";
             }
 
-            // Render Table
+            // 3. Subject Breakdown (FIXED: Shows only Proficiency Text)
+            const tableHead = document.querySelector('#student-grades-table thead tr');
+            // Update Headers to match request
+            tableHead.innerHTML = `<th>Subject</th><th>Proficiency Rating</th>`;
+
             const tbody = document.getElementById('student-grades-body');
             tbody.innerHTML = '';
             
-            if (data.scores) {
-                subjects.forEach((subject) => {
-                    const score = data.scores[subject] !== undefined ? data.scores[subject] : '-';
-                    let feedback = 'Pending';
-                    let color = '#fff';
+            const studentScores = data.scores || {};
 
-                    if (score !== '-') {
-                        if (score >= 70) { feedback = 'Satisfactory'; color = '#28a745'; }
-                        else if (score >= 60) { feedback = 'Fair'; color = '#ffc107'; }
-                        else { feedback = 'Review Required'; color = '#dc3545'; }
+            subjects.forEach((subject) => {
+                const score = studentScores[subject];
+                let statusText = "WAITING";
+                let statusColor = "#888"; // Grey for waiting
+
+                // Logic: Passing is usually 60/80 (75%)
+                if (score !== undefined && score !== null && score !== "") {
+                    if (score >= 60) {
+                        statusText = "PROFICIENT";
+                        statusColor = "#28a745"; // Green
+                    } else {
+                        statusText = "NOT PROFICIENT";
+                        statusColor = "#dc3545"; // Red
                     }
+                }
 
-                    tbody.innerHTML += `
-                        <tr>
-                            <td>${subject}</td>
-                            <td style="color: ${color}">${score} / 80</td>
-                            <td>${feedback}</td>
-                        </tr>
-                    `;
-                });
-            }
+                tbody.innerHTML += `
+                    <tr>
+                        <td>${subject}</td>
+                        <td style="color: ${statusColor}; font-weight: bold;">
+                            ${statusText}
+                        </td>
+                    </tr>
+                `;
+            });
+
+        } else {
+            console.log("No student document found!");
+            document.getElementById('s-name').innerText = "Record Not Found";
         }
+    }, (error) => {
+        console.error("Error fetching student data:", error);
     });
 }
 
