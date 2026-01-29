@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Entrance Exam Portal | Blackboard Style</title>
+    <title>Oral Entrance Examination Portal | Blackboard Style</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     
     <style>
@@ -27,6 +27,7 @@
         /* --- Animations --- */
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
         @keyframes slideDown { from { transform: translate(-50%, -60%); opacity: 0; } to { transform: translate(-50%, -50%); opacity: 1; } }
+        @keyframes pulse { 0% { opacity: 0.6; } 50% { opacity: 1; } 100% { opacity: 0.6; } }
 
         /* --- Layout --- */
         .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
@@ -82,6 +83,10 @@
             color: white;
             border-radius: 4px;
             box-sizing: border-box;
+        }
+        input:focus, select:focus {
+            outline: 2px solid var(--bb-gold);
+            outline-offset: 2px;
         }
 
         /* --- Dashboards --- */
@@ -140,7 +145,7 @@
             border-radius: 12px;
             font-size: 0.8rem;
             font-weight: bold;
-            text-transform: uppercase;
+            text-transform: none;
         }
         .badge-expert { background: #28a745; color: white; }
         .badge-avg { background: #ffc107; color: black; }
@@ -150,12 +155,117 @@
         th, td { text-align: left; padding: 12px; border-bottom: 1px solid var(--bb-border); }
         th { color: var(--bb-gold); }
 
+        /* Additional styles for better UX */
+        .custom-alert-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.8);
+            z-index: 9999;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .loading {
+            animation: pulse 1.5s infinite;
+        }
+
+        /* Fix for table responsiveness */
+        @media (max-width: 768px) {
+            .grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .modal {
+                width: 90% !important;
+                margin: 20px;
+            }
+            
+            table {
+                display: block;
+                overflow-x: auto;
+            }
+            
+            .header {
+                padding: 15px;
+                flex-direction: column;
+                gap: 10px;
+                text-align: center;
+            }
+            
+            .header h1 {
+                font-size: 1.2rem;
+            }
+        }
+
+        /* Status indicators */
+        .status-indicator {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            margin-right: 5px;
+        }
+        .status-active { background-color: #28a745; }
+        .status-pending { background-color: #ffc107; }
+        .status-inactive { background-color: #dc3545; }
+
+        /* Subject breakdown improvements */
+        .subject-breakdown {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px;
+            background: rgba(255,255,255,0.05);
+            border-radius: 4px;
+            margin-bottom: 5px;
+        }
+
+        .subject-score {
+            font-weight: bold;
+            color: var(--bb-gold);
+        }
+
+        .subject-proficiency {
+            font-size: 0.9em;
+            padding: 3px 8px;
+            border-radius: 10px;
+            background: #333;
+        }
+
+        /* Rating scale info */
+        .rating-scale {
+            background: rgba(206, 170, 68, 0.1);
+            border: 1px solid var(--bb-gold);
+            padding: 15px;
+            border-radius: 6px;
+            margin-top: 20px;
+            font-size: 0.9em;
+        }
+
+        .rating-scale h4 {
+            margin-top: 0;
+            color: var(--bb-gold);
+        }
+
+        .rating-scale ul {
+            margin: 10px 0;
+            padding-left: 20px;
+        }
+
+        .rating-scale li {
+            margin-bottom: 5px;
+        }
     </style>
 </head>
 <body>
 
     <div class="header">
-        <h1><i class="fas fa-university"></i> ORAL EXAM PORTAL</h1>
+        <h1><i class="fas fa-university"></i> ORAL ENTRANCE EXAMINATION PORTAL</h1>
         <button id="logout-btn" class="btn btn-danger" style="display: none;">Logout</button>
     </div>
 
@@ -163,112 +273,214 @@
         
         <div id="auth-section">
             <div class="login-card">
-                <h2>Welcome</h2>
-                <p style="color: #888;">Enter credentials to proceed</p>
+                <h2>Welcome to Oral Entrance Exam Portal</h2>
+                <p style="color: #888; margin-bottom: 20px;">Enter credentials to proceed</p>
                 <input type="email" id="email" placeholder="Institutional Email">
                 <input type="password" id="password" placeholder="Password">
-                <button class="btn" onclick="handleLogin()">Login</button>
-                <div style="margin-top: 15px; font-size: 0.8em; color: #666;">
-                    *Admin accounts must end in @admin.edu
+                <button class="btn" onclick="handleLogin()" style="width: 100%; margin-top: 15px;">Login</button>
+                <div style="margin-top: 20px; font-size: 0.85em; color: #888;">
+                    <div><i class="fas fa-info-circle"></i> Admin accounts must end in @admin.edu</div>
+                    <div><i class="fas fa-info-circle"></i> Student accounts are created by administrators</div>
                 </div>
             </div>
         </div>
 
         <div id="student-dashboard" class="dashboard">
-            <h2><i class="fas fa-user-graduate"></i> Student Overview</h2>
+            <h2><i class="fas fa-user-graduate"></i> Student Examination Overview</h2>
+            
             <div class="grid">
                 <div class="card">
                     <h3>Candidate Profile</h3>
-                    <p><strong>Name:</strong> <span id="s-name">Loading...</span></p>
-                    <p><strong>Level:</strong> <span id="s-level">Loading...</span></p>
+                    <p><strong>Name:</strong> <span id="s-name" class="loading">Loading...</span></p>
+                    <p><strong>Level:</strong> <span id="s-level" class="loading">Loading...</span></p>
                     <p><strong>Status:</strong> <span id="s-status">Pending</span></p>
+                    <p><strong>Email:</strong> <span id="s-email">Loading...</span></p>
                 </div>
 
                 <div class="card" style="border-left-color: var(--bb-gold);">
-                    <h3>Proficiency Rating</h3>
-                    <div id="s-proficiency-badge" class="badge">WAITING</div>
+                    <h3>Overall Proficiency Rating</h3>
+                    <div id="s-proficiency-badge" class="badge" style="margin-bottom: 15px; background: #555; padding: 8px 15px;">waiting</div>
                     <div class="score-display">
-                        <span id="s-total-score">0</span> / <span id="s-max-score">320</span>
+                        <span id="s-total-score">0</span> / <span id="s-max-score">480</span>
                     </div>
-                    <p>Total Cumulative Score</p>
+                    <p>Total Cumulative Score (6 subjects × 80 points each)</p>
+                    
+                    <div id="overall-rating" style="margin-top: 15px;">
+                        <p><strong>GPA Scale Rating:</strong> <span id="s-gpa-rating">0.0</span></p>
+                        <p><strong>Proficiency:</strong> <span id="s-proficiency-text">Not evaluated</span></p>
+                    </div>
                 </div>
             </div>
 
             <div class="card" style="margin-top: 20px;">
-                <h3>Subject Breakdown</h3>
+                <h3>Subject Breakdown & Proficiency Analysis</h3>
                 <table id="student-grades-table">
                     <thead>
                         <tr>
                             <th>Subject</th>
-                            <th>Score (Max 80)</th>
-                            <th>Feedback</th>
+                            <th>Score (Out of 80)</th>
+                            <th>Rating (4.0 Scale)</th>
+                            <th>Proficiency Status</th>
                         </tr>
                     </thead>
                     <tbody id="student-grades-body">
-                        </tbody>
+                        <tr>
+                            <td colspan="4" style="text-align: center; padding: 30px; color: #888;">
+                                <i class="fas fa-spinner fa-spin"></i> Loading subject data...
+                            </td>
+                        </tr>
+                    </tbody>
                 </table>
+                
+                <div class="rating-scale">
+                    <h4><i class="fas fa-chart-line"></i> Proficiency Rating Scale</h4>
+                    <ul>
+                        <li><strong>4.0 (proficient)</strong> - 70% to 74% (56-59 points)</li>
+                        <li><strong>3.0 (proficient)</strong> - 75% to 79% (60-63 points)</li>
+                        <li><strong>2.0 (proficient)</strong> - 80% to 89% (64-71 points)</li>
+                        <li><strong>1.0 (proficient)</strong> - 90% and above (72-80 points)</li>
+                        <li><strong>0.0 (not proficient)</strong> - Below 70% (0-55 points)</li>
+                    </ul>
+                    <p style="margin: 0; font-size: 0.85em;"><i class="fas fa-info-circle"></i> Each subject is scored out of 80 points (6 subjects total = 480 points maximum)</p>
+                </div>
             </div>
         </div>
 
         <div id="admin-dashboard" class="dashboard">
             <div style="display: flex; justify-content: space-between; align-items: center;">
                 <h2><i class="fas fa-user-cog"></i> Examiner Control Panel</h2>
-                <button class="btn btn-gold" onclick="openModal('add-student-modal')">+ Register Candidate</button>
+                <button class="btn btn-gold" onclick="openModal('add-student-modal')">
+                    <i class="fas fa-user-plus"></i> Register New Candidate
+                </button>
             </div>
 
             <div class="card" style="margin-top: 20px;">
-                <h3>Registered Candidates</h3>
+                <h3><i class="fas fa-list"></i> Registered Candidates</h3>
+                <div style="margin-bottom: 15px; color: #aaa; font-size: 0.9em;">
+                    Total: <span id="candidate-count">0</span> candidates registered
+                </div>
                 <table>
                     <thead>
                         <tr>
                             <th>Name</th>
                             <th>Level</th>
                             <th>Total Score</th>
+                            <th>Proficiency</th>
                             <th>Actions</th>
                         </tr>
                     </thead>
                     <tbody id="admin-student-list">
-                        </tbody>
+                        <tr>
+                            <td colspan="5" style="text-align: center; padding: 30px; color: #888;">
+                                <i class="fas fa-spinner fa-spin"></i> Loading registered candidates...
+                            </td>
+                        </tr>
+                    </tbody>
                 </table>
+                <div style="margin-top: 15px; font-size: 0.85em; color: #888;">
+                    <i class="fas fa-info-circle"></i> Click "Grade" to evaluate a candidate's oral exam performance
+                </div>
             </div>
         </div>
 
     </div>
 
     <div id="grade-modal" class="modal-overlay">
-        <div class="modal">
-            <h2><i class="fas fa-edit"></i> Evaluate Candidate</h2>
+        <div class="modal" style="max-width: 600px; max-height: 80vh; overflow-y: auto;">
+            <h2><i class="fas fa-edit"></i> Evaluate Candidate - Oral Exam</h2>
             <input type="hidden" id="grading-uid">
             
-            <div id="rubric-container">
-                </div>
+            <div style="margin-bottom: 20px; padding: 15px; background: rgba(206, 170, 68, 0.1); border-radius: 6px;">
+                <h3 id="grading-candidate-name" style="margin-top: 0; color: var(--bb-gold);"></h3>
+                <p id="grading-candidate-level" style="margin: 5px 0; color: #aaa;"></p>
+                <p style="margin: 5px 0; font-size: 0.9em;"><i class="fas fa-info-circle"></i> Score each subject from 0 to 80 points based on oral examination performance.</p>
+            </div>
+            
+            <div id="rubric-container" style="margin: 20px 0;">
+                <!-- Rubric will be dynamically inserted here -->
+            </div>
 
-            <div style="margin-top: 20px; text-align: right;">
+            <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid var(--bb-border); text-align: right;">
                 <button class="btn btn-danger" onclick="closeModal('grade-modal')">Cancel</button>
-                <button class="btn" onclick="submitGrades()">Submit Evaluation</button>
+                <button class="btn btn-gold" onclick="submitGrades()">
+                    <i class="fas fa-check-circle"></i> Submit Evaluation
+                </button>
             </div>
         </div>
     </div>
 
     <div id="add-student-modal" class="modal-overlay">
         <div class="modal">
-            <h2>Register New Candidate</h2>
-            <input type="text" id="new-name" placeholder="Full Name">
-            <input type="email" id="new-email" placeholder="Email">
-            <input type="password" id="new-pass" placeholder="Password">
-            <select id="new-level" style="width: 100%; padding: 12px; background: #111; color: white; border: 1px solid #444; margin: 10px 0;">
+            <h2><i class="fas fa-user-plus"></i> Register New Candidate</h2>
+            <p style="color: #888; margin-top: -10px; margin-bottom: 20px;">Create new student account for oral examination</p>
+            
+            <input type="text" id="new-name" placeholder="Full Name (as it will appear on certificate)">
+            <input type="email" id="new-email" placeholder="Institutional Email Address">
+            <input type="password" id="new-pass" placeholder="Temporary Password (student can change later)">
+            
+            <select id="new-level" style="width: 100%; padding: 12px; background: #111; color: white; border: 1px solid #444; margin: 10px 0; border-radius: 4px;">
+                <option value="">Select Education Level</option>
                 <option value="JHS">Junior High School</option>
                 <option value="SHS">Senior High School</option>
                 <option value="College">College</option>
             </select>
-            <button class="btn" onclick="registerStudent()">Create Account</button>
-            <button class="btn btn-danger" onclick="closeModal('add-student-modal')">Close</button>
+            
+            <div style="margin-top: 20px; padding: 15px; background: rgba(0, 118, 168, 0.1); border-radius: 6px;">
+                <h4 style="margin-top: 0; color: var(--bb-accent);">Subjects to be examined (80 points each):</h4>
+                <ul style="margin: 10px 0; padding-left: 20px; font-size: 0.9em;">
+                    <li>Math (algebra, geometry, calculus)</li>
+                    <li>Science (biology, chemistry, physics)</li>
+                    <li>English/Language (grammar, reading, vocabulary)</li>
+                    <li>Logical/Abstract Reasoning</li>
+                    <li>General Knowledge</li>
+                    <li>Filipino/Social Sciences</li>
+                </ul>
+            </div>
+            
+            <div style="display: flex; gap: 10px; margin-top: 20px;">
+                <button class="btn" onclick="registerStudent()" style="flex: 1;">
+                    <i class="fas fa-user-check"></i> Create Candidate Account
+                </button>
+                <button class="btn btn-danger" onclick="closeModal('add-student-modal')" style="flex: 1;">
+                    Cancel
+                </button>
+            </div>
         </div>
     </div>
+
+    <!-- Success/Error Message Container -->
+    <div id="message-container" style="position: fixed; top: 20px; right: 20px; z-index: 9999; max-width: 350px;"></div>
 
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
+    
+    <script>
+        // This script is here to handle immediate UI interactions before the main script loads
+        document.addEventListener('DOMContentLoaded', function() {
+            // Add Enter key support for login
+            document.getElementById('password').addEventListener('keypress', function(e) {
+                if (e.key === 'Enter') {
+                    if (typeof handleLogin === 'function') {
+                        handleLogin();
+                    }
+                }
+            });
+            
+            // Close modals when clicking outside
+            document.addEventListener('click', function(event) {
+                const modals = document.querySelectorAll('.modal-overlay');
+                modals.forEach(modal => {
+                    if (event.target === modal) {
+                        modal.style.display = 'none';
+                    }
+                });
+            });
+            
+            // Show loading states
+            console.log("Oral Entrance Examination Portal initialized");
+        });
+    </script>
     
     <script src="script.js"></script>
 </body>
